@@ -24,7 +24,18 @@ Deploy this folder as a separate Vercel project. Enable Vercel Deployment Protec
 
 The secret is used only by Next.js server routes and is never exposed to browser code. Do not reuse the cron or Telegram webhook secrets.
 
-The dashboard server proxies same-origin requests to protected Sotra endpoints for status, pause/resume, and manual scans. The bot remains the source of truth and continues to own all state and scanning behavior. Manual scans can send Telegram alerts when scheduled alerts are active. No broker connection, order execution, market quote feed, or signal history is implemented; the chart is explicitly illustrative.
+The dashboard server proxies same-origin requests to protected Sotra endpoints for status, pause/resume, settings, and manual scans. The bot remains the source of truth and persists dashboard overrides in its shared state store. Markets, candle interval, scan cadence, and minimum reward/risk apply to future scans; reset restores the bot's environment-configured defaults. Paused scheduled alerts do not send Telegram notifications, and manual scans while paused still analyze without sending. On Vercel, changing the displayed scan cadence does not modify cron-job.org; update the external cron schedule separately. No broker connection, order execution, market quote feed, or signal history is implemented; the chart is explicitly illustrative.
+
+## Dashboard pages
+
+- `/`: overview, service status, summary metrics, and manual scan.
+- `/markets`: configured watchlist and illustrative chart.
+- `/signals`: latest detected setup; no signal history is claimed.
+- `/alerts`: pause/resume Telegram delivery and alert behavior.
+- `/settings`: markets, candle interval, and scan cadence.
+- `/strategy`: create named profiles for the existing strategy, activate one for future scans, and compare parameter configurations. This is not a historical backtest or a performance comparison; adding a distinct strategy requires bot-side strategy logic.
+
+The sidebar and page header live in the shared App Router layout; mobile navigation links to the same pages.
 
 ## Stack
 

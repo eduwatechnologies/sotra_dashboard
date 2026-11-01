@@ -62,12 +62,12 @@ export async function proxySotraApi(
     return Response.json({ error: "Sotra service is unavailable" }, { status: 502 });
   }
 
-  let data: unknown;
-  try {
-    data = await upstream.json();
-  } catch {
-    console.error("Sotra API returned an invalid response.");
-    return Response.json({ error: "Sotra service returned an invalid response" }, { status: 502 });
+  if (upstream.status === 404) {
+    console.error(`Sotra API endpoint was not found: ${path}.`);
+    return Response.json(
+      { error: "Sotra API endpoint is missing. Redeploy the bot project with the latest code." },
+      { status: 502 }
+    );
   }
 
   if (!upstream.ok) {
@@ -79,6 +79,32 @@ export async function proxySotraApi(
           ? "Dashboard API authorization failed"
           : "Sotra service request failed";
     return Response.json({ error: message }, { status });
+  }
+
+  const contentType = upstream.headers.get("content-type") ?? "";
+  if (!/\bapplication\/(?:[\w.-]+\+)?json\b/i.test(contentType)) {
+    console.error(
+      `Sotra API returned a non-JSON response (HTTP ${upstream.status}, content type: ${
+        contentType || "missing"
+      }).`
+    );
+    return Response.json(
+      { error: "Sotra service returned an invalid response" },
+      { status: 502 }
+    );
+  }
+
+  let data: unknown;
+  try {
+    data = await upstream.json();
+  } catch {
+    console.error(
+      `Sotra API returned invalid JSON (HTTP ${upstream.status}, content type: ${contentType}).`
+    );
+    return Response.json(
+      { error: "Sotra service returned an invalid response" },
+      { status: 502 }
+    );
   }
 
   return Response.json(data, { status: upstream.status });

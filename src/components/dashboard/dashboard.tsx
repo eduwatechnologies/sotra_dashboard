@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   ArrowDownRight,
   ArrowUpRight,
   Bell,
   CircleDot,
   Clock3,
-  Menu,
   Radio,
   ShieldCheck,
   Sparkles,
@@ -20,14 +19,54 @@ import { CardHeading, DashboardCard } from "./dashboard-card";
 import { marketLabel } from "./dashboard-data";
 import { MetricCard } from "./metric-card";
 import { PriceChart } from "./price-chart";
-import { Sidebar } from "./sidebar";
 import {
+  isDashboardSettings,
   isDashboardScanResponse,
   isDashboardStatus,
+  type DashboardSettings,
   type DashboardScanResponse,
   type DashboardStatus,
   type SignalData,
 } from "@/lib/dashboard-types";
+
+interface SettingsDraft {
+  symbols: string;
+  interval: string;
+  scanIntervalMinutes: string;
+}
+
+export type DashboardPage = "overview" | "markets" | "signals" | "alerts" | "settings";
+
+const pageDetails: Record<DashboardPage, { title: string; description: string }> = {
+  overview: {
+    title: "Market overview",
+    description: "Your connection, alert state, and latest monitoring activity.",
+  },
+  markets: {
+    title: "Markets",
+    description: "Review the configured watchlist and illustrative chart preview.",
+  },
+  signals: {
+    title: "Latest setup",
+    description: "Inspect the most recently detected setup and its rationale.",
+  },
+  alerts: {
+    title: "Alerts",
+    description: "Control scheduled Telegram alerts and review delivery behavior.",
+  },
+  settings: {
+    title: "Settings",
+    description: "Configure the markets and scan parameters used by Sotra.",
+  },
+};
+
+function settingsDraftFromStatus(status: DashboardStatus | null): SettingsDraft {
+  return {
+    symbols: status?.symbols.join(", ") ?? "",
+    interval: status?.interval ?? "",
+    scanIntervalMinutes: status ? String(status.scanIntervalMs / 60_000) : "",
+  };
+}
 
 async function readJson(response: Response): Promise<unknown> {
   const data: unknown = await response.json();
@@ -80,20 +119,25 @@ function formatDuration(milliseconds: number): string {
   return `${hours} hour${hours === 1 ? "" : "s"}`;
 }
 
-export function Dashboard() {
+export function Dashboard({ page = "overview" }: { page?: DashboardPage }) {
   const [selectedSymbol, setSelectedSymbol] = useState("XAU/USD");
-  const [menuOpen, setMenuOpen] = useState(false);
   const [status, setStatus] = useState<DashboardStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [pendingAction, setPendingAction] = useState<"pause" | "scan" | null>(null);
+  const [pendingAction, setPendingAction] = useState<
+    "pause" | "scan" | "settings" | null
+  >(null);
   const [scanResponse, setScanResponse] = useState<DashboardScanResponse | null>(null);
+  const [settingsDraft, setSettingsDraft] = useState<SettingsDraft | null>(null);
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
   const reduceMotion = useReducedMotion();
   const symbols = status?.symbols ?? [];
   const chartSymbol = symbols.includes(selectedSymbol)
     ? selectedSymbol
     : (symbols[0] ?? selectedSymbol);
+  const settingsValues = settingsDraft ?? settingsDraftFromStatus(status);
+  const pageDetail = pageDetails[page];
 
   useEffect(() => {
     let active = true;
@@ -197,67 +241,59 @@ export function Dashboard() {
     }
   }
 
+  async function saveDashboardSettings(settings: DashboardSettings | null) {
+    if (!status || pendingAction) {
+      return;
+    }
+
+    setPendingAction("settings");
+    setActionError(null);
+    setSettingsMessage(null);
+    try {
+      const response = await fetch("/api/dashboard/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings }),
+      });
+      const data: unknown = await readJson(response);
+      if (!isDashboardStatus(data)) {
+        throw new Error("Dashboard returned invalid settings status");
+      }
+      setStatus(data);
+      setSettingsDraft(settingsDraftFromStatus(data));
+      setSettingsMessage(
+        settings
+          ? "Settings saved. They will be used for future scans."
+          : "Settings reset to the bot's configured defaults."
+      );
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  function submitDashboardSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const settings: DashboardSettings = {
+      symbols: settingsValues.symbols.split(",").map((symbol) => symbol.trim()),
+      interval: settingsValues.interval.trim(),
+      scanIntervalMs: Number(settingsValues.scanIntervalMinutes) * 60_000,
+    };
+    if (!isDashboardSettings(settings)) {
+      setActionError(
+        "Check the settings: use 1–20 unique SYMBOL/QUOTE markets, a valid interval, and a scan cadence of 1–1440 minutes."
+      );
+      return;
+    }
+    void saveDashboardSettings(settings);
+  }
+
   return (
-    <div className="dashboard-background relative min-h-screen overflow-hidden">
-      <div className="subtle-grid pointer-events-none absolute inset-x-0 top-0 h-[480px]" />
-      <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
-
-      <div className="relative min-w-0 lg:pl-[264px]">
-        <header className="sticky top-0 z-30 border-b border-white/[0.065] bg-[#090b0e]/85 backdrop-blur-xl">
-          <div className="mx-auto flex h-[68px] max-w-[1500px] items-center justify-between gap-3 px-4 sm:px-7 lg:px-10">
-            <div className="flex min-w-0 items-center gap-3">
-              <button
-                type="button"
-                aria-label="Open navigation"
-                aria-expanded={menuOpen}
-                onClick={() => setMenuOpen(true)}
-                className="grid size-9 shrink-0 place-items-center rounded-xl border border-white/[0.08] text-[#c2c4c8] hover:bg-white/[0.06] lg:hidden"
-              >
-                <Menu size={18} />
-              </button>
-              <div className="min-w-0">
-                <p className="text-[10px] font-medium uppercase tracking-[0.15em] text-[#747b86]">
-                  Sotra Signals
-                </p>
-                <p className="mt-0.5 truncate text-xs font-medium text-[#e1dfd9]">
-                  Market overview
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 sm:gap-3">
-              <span className="hidden items-center gap-2 rounded-full border border-white/[0.075] bg-white/[0.025] px-3 py-1.5 text-[10px] text-[#a2a7b0] sm:inline-flex">
-                <span
-                  className={`size-1.5 rounded-full ${
-                    status ? "bg-emerald-400" : "bg-[#8d929c]"
-                  }`}
-                />
-                {loading && !status
-                  ? "Connecting…"
-                  : status
-                    ? "Sotra API connected"
-                    : "Sotra API unavailable"}
-              </span>
-              <button
-                type="button"
-                disabled
-                aria-label="Notifications (not available)"
-                title="Notifications are not connected"
-                className="relative grid size-9 cursor-not-allowed place-items-center rounded-xl border border-white/[0.075] bg-white/[0.025] text-[#737984]"
-              >
-                <Bell size={16} strokeWidth={1.8} />
-              </button>
-              <div className="grid size-9 place-items-center rounded-xl border border-[#efbd5b]/20 bg-[#efbd5b]/[0.09] text-xs font-semibold text-[#f0ca7e]">
-                S
-              </div>
-            </div>
-          </div>
-        </header>
-
-        <main
-          id="overview"
-          className="mx-auto w-full max-w-[1500px] px-4 pb-12 pt-7 sm:px-7 sm:pt-9 lg:px-10 lg:pt-10"
-        >
+    <main
+      id="page-content"
+      className="mx-auto w-full max-w-[1500px] px-4 pb-12 pt-7 sm:px-7 sm:pt-9 lg:px-10 lg:pt-10"
+    >
           <motion.div
             initial={reduceMotion ? false : { opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -270,10 +306,10 @@ export function Dashboard() {
                 Sotra dashboard
               </div>
               <h1 className="text-[30px] font-semibold tracking-[-0.055em] text-[#f4f3ef] sm:text-[36px]">
-                Market overview<span className="text-[#efbd5b]">.</span>
+                {pageDetail.title}<span className="text-[#efbd5b]">.</span>
               </h1>
               <p className="mt-2 max-w-xl text-[13px] leading-6 text-[#9297a1]">
-                Your configured markets, alert status, and latest detected setup.
+                {pageDetail.description}
               </p>
             </div>
             <div className="flex items-center gap-2 self-start rounded-xl border border-white/[0.07] bg-white/[0.025] px-3 py-2 text-[11px] text-[#aaafb7] sm:self-auto">
@@ -282,20 +318,22 @@ export function Dashboard() {
             </div>
           </motion.div>
 
-          <div
-            role="note"
-            className="mb-5 flex items-start gap-3 rounded-2xl border border-[#efbd5b]/[0.16] bg-[#efbd5b]/[0.045] px-4 py-3.5 sm:items-center"
-          >
+          {page !== "alerts" && page !== "settings" ? (
+            <div
+              role="note"
+              className="mb-5 flex items-start gap-3 rounded-2xl border border-[#efbd5b]/[0.16] bg-[#efbd5b]/[0.045] px-4 py-3.5 sm:items-center"
+            >
             <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[#efbd5b]/[0.1] text-[#efbd5b] sm:mt-0">
               <CircleDot size={15} />
             </span>
             <p className="text-[11px] leading-5 text-[#c2b9a4]">
               <span className="font-semibold text-[#eed29b]">Analysis only.</span>{" "}
               Manual scans may send Telegram alerts when alerts are active. Sotra never
-              places or manages trades. The chart below is illustrative; live prices are not
+              places or manages trades. Chart previews are illustrative; live prices are not
               connected.
             </p>
-          </div>
+            </div>
+          ) : null}
 
           {loadError ? (
             <div
@@ -314,6 +352,7 @@ export function Dashboard() {
             </div>
           ) : null}
 
+          {page === "overview" ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               label="Scheduled alerts"
@@ -360,8 +399,11 @@ export function Dashboard() {
               delay={0.22}
             />
           </div>
+          ) : null}
 
+          {page === "overview" || page === "alerts" ? (
           <div className="mt-4 flex flex-wrap items-center gap-2">
+            {page === "alerts" ? (
             <button
               type="button"
               disabled={!status || pendingAction !== null}
@@ -374,6 +416,8 @@ export function Dashboard() {
                   ? "Resume alerts"
                   : "Pause alerts"}
             </button>
+            ) : null}
+            {page === "overview" ? (
             <button
               type="button"
               disabled={!status || pendingAction !== null}
@@ -382,14 +426,142 @@ export function Dashboard() {
             >
               {pendingAction === "scan" ? "Scanning markets…" : "Run manual scan"}
             </button>
+            ) : null}
             {status ? (
               <span className="text-[10px] text-[#777e88]">
-                Scheduled cadence: {formatDuration(status.scanIntervalMs)}
+                Configured cadence: {formatDuration(status.scanIntervalMs)}
               </span>
             ) : null}
           </div>
+          ) : null}
 
-          {scanResponse ? (
+          {page === "settings" ? (
+          <DashboardCard className="mt-4 p-4 sm:p-5">
+            <CardHeading
+              title="Scan settings"
+              description="Choose the markets, candle interval, and cadence used by future scans."
+            />
+            <form className="mt-4" onSubmit={submitDashboardSettings}>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <label className="text-[10px] text-[#9297a1]">
+                  Markets
+                  <input
+                    required
+                    disabled={!status || pendingAction !== null}
+                    value={settingsValues.symbols}
+                    onChange={(event) => {
+                      setSettingsMessage(null);
+                      setSettingsDraft((current) => ({
+                        ...(current ?? settingsDraftFromStatus(status)),
+                        symbols: event.target.value,
+                      }));
+                    }}
+                    placeholder="XAU/USD, EUR/USD"
+                    className="mt-1.5 w-full rounded-lg border border-white/[0.09] bg-[#0d1014] px-3 py-2.5 text-xs text-[#e1dfd9] outline-none focus:border-[#efbd5b]/40 disabled:opacity-50"
+                  />
+                </label>
+                <label className="text-[10px] text-[#9297a1]">
+                  Candle interval
+                  <input
+                    required
+                    disabled={!status || pendingAction !== null}
+                    value={settingsValues.interval}
+                    onChange={(event) => {
+                      setSettingsMessage(null);
+                      setSettingsDraft((current) => ({
+                        ...(current ?? settingsDraftFromStatus(status)),
+                        interval: event.target.value,
+                      }));
+                    }}
+                    placeholder="5min"
+                    pattern="[0-9]+(min|h|day|week|month)"
+                    title="Use a value such as 5min, 1h, or 1day"
+                    className="mt-1.5 w-full rounded-lg border border-white/[0.09] bg-[#0d1014] px-3 py-2.5 text-xs text-[#e1dfd9] outline-none focus:border-[#efbd5b]/40 disabled:opacity-50"
+                  />
+                </label>
+                <label className="text-[10px] text-[#9297a1]">
+                  Scan cadence (minutes)
+                  <input
+                    required
+                    type="number"
+                    min={1}
+                    max={1440}
+                    step={1}
+                    disabled={!status || pendingAction !== null}
+                    value={settingsValues.scanIntervalMinutes}
+                    onChange={(event) => {
+                      setSettingsMessage(null);
+                      setSettingsDraft((current) => ({
+                        ...(current ?? settingsDraftFromStatus(status)),
+                        scanIntervalMinutes: event.target.value,
+                      }));
+                    }}
+                    className="mt-1.5 w-full rounded-lg border border-white/[0.09] bg-[#0d1014] px-3 py-2.5 text-xs text-[#e1dfd9] outline-none focus:border-[#efbd5b]/40 disabled:opacity-50"
+                  />
+                </label>
+              </div>
+              <p className="mt-3 text-[10px] leading-5 text-[#777e88]">
+                On Vercel, changing the configured cadence does not reschedule cron-job.org.
+                Update the external job separately. Minimum reward/risk and other strategy
+                parameters are managed on the Strategy page. Reset restores bot defaults.
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={!status || pendingAction !== null}
+                  className="rounded-xl border border-[#efbd5b]/20 bg-[#efbd5b]/[0.08] px-4 py-2.5 text-xs font-medium text-[#f0ca7e] transition hover:bg-[#efbd5b]/[0.14] disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {pendingAction === "settings" ? "Saving…" : "Save settings"}
+                </button>
+                <button
+                  type="button"
+                  disabled={!status || pendingAction !== null}
+                  onClick={() => void saveDashboardSettings(null)}
+                  className="rounded-xl border border-white/[0.09] bg-white/[0.035] px-4 py-2.5 text-xs font-medium text-[#d3d1cb] transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  Reset to defaults
+                </button>
+                {settingsMessage ? (
+                  <span role="status" className="text-[10px] text-emerald-300">
+                    {settingsMessage}
+                  </span>
+                ) : null}
+              </div>
+            </form>
+          </DashboardCard>
+          ) : null}
+
+          {page === "alerts" ? (
+            <DashboardCard className="mt-4 p-4 sm:p-5">
+              <CardHeading
+                title="Telegram delivery"
+                description="Alert state applies to scheduled signal scans and manual scans."
+              />
+              <div className="mt-4 space-y-3">
+                <StatusRow
+                  icon={Bell}
+                  label="Scheduled signal alerts"
+                  value={
+                    status
+                      ? status.paused
+                        ? "Paused"
+                        : "Active"
+                      : loading
+                        ? "Loading"
+                        : "Unavailable"
+                  }
+                  status={status ? (status.paused ? "paused" : "online") : "offline"}
+                />
+                <p className="text-xs leading-6 text-[#9297a1]">
+                  When paused, scheduled scans do not send signal alerts. Manual scans still
+                  analyze configured markets, but notifications remain suppressed. Resume alerts
+                  to allow new scheduled signals to be delivered to the configured Telegram chat.
+                </p>
+              </div>
+            </DashboardCard>
+          ) : null}
+
+          {page === "overview" && scanResponse ? (
             <DashboardCard className="mt-4 p-4 sm:p-5">
               <CardHeading
                 title="Manual scan results"
@@ -438,10 +610,12 @@ export function Dashboard() {
             </DashboardCard>
           ) : null}
 
-          <div className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-12">
+          {page === "markets" || page === "signals" ? (
+          <div className="mt-5 grid grid-cols-1 gap-5">
+            {page === "markets" ? (
             <DashboardCard
               id="markets"
-              className="min-w-0 p-4 sm:p-5 xl:col-span-8"
+              className="min-w-0 p-4 sm:p-5"
             >
               <CardHeading
                 title="Market watch"
@@ -510,10 +684,12 @@ export function Dashboard() {
                 )}
               </div>
             </DashboardCard>
+            ) : null}
 
+            {page === "signals" ? (
             <DashboardCard
               id="latest-setup"
-              className="flex flex-col p-4 sm:p-5 xl:col-span-4"
+              className="flex flex-col p-4 sm:p-5"
             >
               <CardHeading
                 title="Latest setup"
@@ -542,10 +718,14 @@ export function Dashboard() {
                 </div>
               )}
             </DashboardCard>
+            ) : null}
           </div>
+          ) : null}
 
-          <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-12">
-            <DashboardCard className="p-4 sm:p-5 lg:col-span-7">
+          {page === "markets" || page === "overview" ? (
+          <div className="mt-5 grid grid-cols-1 gap-5">
+            {page === "markets" ? (
+            <DashboardCard className="p-4 sm:p-5">
               <CardHeading
                 title="Watchlist"
                 description="Symbols currently configured in Sotra"
@@ -598,8 +778,10 @@ export function Dashboard() {
                 </div>
               )}
             </DashboardCard>
+            ) : null}
 
-            <DashboardCard className="p-4 sm:p-5 lg:col-span-5">
+            {page === "overview" ? (
+            <DashboardCard className="p-4 sm:p-5">
               <CardHeading
                 title="Workspace status"
                 description="Connection and strategy settings"
@@ -633,7 +815,7 @@ export function Dashboard() {
                 />
                 <StatusRow
                   icon={Clock3}
-                  label="Scheduled scan cadence"
+                  label="Configured scan cadence"
                   value={status ? formatDuration(status.scanIntervalMs) : "Unavailable"}
                   status="neutral"
                 />
@@ -659,15 +841,15 @@ export function Dashboard() {
                 </div>
               </div>
             </DashboardCard>
+            ) : null}
           </div>
+          ) : null}
 
           <footer className="mt-8 flex flex-col gap-2 border-t border-white/[0.06] pt-5 text-[10px] text-[#686f79] sm:flex-row sm:items-center sm:justify-between">
             <p>Sotra Signals · Private market-analysis workspace</p>
             <p>Analysis only · No trade execution</p>
           </footer>
-        </main>
-      </div>
-    </div>
+    </main>
   );
 }
 

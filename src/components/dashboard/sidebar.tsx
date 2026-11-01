@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   Activity,
   ArrowUpRight,
@@ -9,13 +11,17 @@ import {
   LayoutDashboard,
   Menu,
   Settings2,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 
 const navigation = [
-  { label: "Overview", href: "#overview", icon: LayoutDashboard },
-  { label: "Markets", href: "#markets", icon: ChartNoAxesCombined },
-  { label: "Latest setup", href: "#latest-setup", icon: Activity },
+  { label: "Overview", href: "/", icon: LayoutDashboard },
+  { label: "Markets", href: "/markets", icon: ChartNoAxesCombined },
+  { label: "Latest setup", href: "/signals", icon: Activity },
+  { label: "Strategy", href: "/strategy", icon: SlidersHorizontal },
+  { label: "Alerts", href: "/alerts", icon: BellRing },
+  { label: "Settings", href: "/settings", icon: Settings2 },
 ];
 
 export function Sidebar({
@@ -25,6 +31,8 @@ export function Sidebar({
   open: boolean;
   onClose: () => void;
 }) {
+  const pathname = usePathname();
+
   return (
     <>
       {open ? (
@@ -42,8 +50,8 @@ export function Sidebar({
         aria-label="Main navigation"
       >
         <div className="flex items-center justify-between px-1">
-          <a
-            href="#overview"
+          <Link
+            href="/"
             onClick={onClose}
             className="flex items-center gap-3"
             aria-label="Sotra Signals home"
@@ -59,7 +67,7 @@ export function Sidebar({
                 Signals workspace
               </span>
             </span>
-          </a>
+          </Link>
           <button
             type="button"
             aria-label="Close navigation"
@@ -75,48 +83,29 @@ export function Sidebar({
             Workspace
           </p>
           <nav className="mt-3 space-y-1">
-            {navigation.map(({ label, href, icon: Icon }, index) => (
-              <a
+            {navigation.map(({ label, href, icon: Icon }) => {
+              const active = pathname === href;
+              return (
+              <Link
                 key={label}
                 href={href}
                 onClick={onClose}
-                aria-current={index === 0 ? "page" : undefined}
+                aria-current={active ? "page" : undefined}
                 className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] transition-colors ${
-                  index === 0
+                  active
                     ? "border border-[#efbd5b]/[0.13] bg-[#efbd5b]/[0.075] text-[#f2ca78]"
                     : "text-[#9297a1] hover:bg-white/[0.045] hover:text-[#f1f0eb]"
                 }`}
               >
                 <Icon size={17} strokeWidth={1.7} />
                 <span className="flex-1">{label}</span>
-                {index === 0 ? (
+                {active ? (
                   <span className="size-1.5 rounded-full bg-[#efbd5b]" />
                 ) : null}
-              </a>
-            ))}
+              </Link>
+              );
+            })}
           </nav>
-        </div>
-
-        <div className="mt-9">
-          <p className="px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#666d78]">
-            Preferences
-          </p>
-          <div className="mt-3 space-y-1">
-            <span className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] text-[#666d78]">
-              <BellRing size={17} strokeWidth={1.7} />
-              Alerts
-              <span className="ml-auto rounded-md border border-white/[0.07] px-1.5 py-0.5 text-[9px] uppercase tracking-wide">
-                Soon
-              </span>
-            </span>
-            <span className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] text-[#666d78]">
-              <Settings2 size={17} strokeWidth={1.7} />
-              Settings
-              <span className="ml-auto rounded-md border border-white/[0.07] px-1.5 py-0.5 text-[9px] uppercase tracking-wide">
-                Soon
-              </span>
-            </span>
-          </div>
         </div>
 
         <div className="mt-auto">
@@ -128,13 +117,13 @@ export function Sidebar({
             <p className="mt-2 text-[11px] leading-[1.65] text-[#818792]">
               Sotra shares market analysis and alerts. It does not place or manage trades.
             </p>
-            <a
-              href="#about-preview"
+            <Link
+              href="/#about-preview"
               onClick={onClose}
               className="mt-3 inline-flex items-center gap-1 text-[10px] font-medium text-[#efbd5b] hover:text-[#ffda91]"
             >
               About this preview <ArrowUpRight size={12} />
-            </a>
+            </Link>
           </div>
           <div className="mt-4 flex items-center gap-2 px-1 text-[10px] text-[#69707a]">
             <Menu size={13} />
