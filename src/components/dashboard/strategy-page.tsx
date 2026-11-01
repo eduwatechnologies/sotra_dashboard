@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import { Check, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Check, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { CardHeading, DashboardCard } from "./dashboard-card";
 import {
   isStrategyParameters,
+  isDashboardPerformance,
   isStrategyProfilesResponse,
+  type DashboardPerformance,
   type StrategyParameters,
   type StrategyProfile,
   type StrategyProfilesResponse,
@@ -114,12 +116,26 @@ function formatParameter(key: keyof StrategyParameters, value: number): string {
 
 export function StrategyPage() {
   const [data, setData] = useState<StrategyProfilesResponse | null>(null);
+  const [performance, setPerformance] = useState<DashboardPerformance | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftParameters, setDraftParameters] = useState<StrategyParameters | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [performanceLoading, setPerformanceLoading] = useState(true);
+  const [performanceError, setPerformanceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!createOpen || !dialog) {
+      return;
+    }
+    dialog.showModal();
+    return () => dialog.close();
+  }, [createOpen]);
 
   useEffect(() => {
     let active = true;
@@ -142,6 +158,35 @@ export function StrategyPage() {
       .finally(() => {
         if (active) {
           setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/dashboard/performance", { cache: "no-store" })
+      .then(readJson)
+      .then((response) => {
+        if (!isDashboardPerformance(response)) {
+          throw new Error("Dashboard returned invalid signal performance data");
+        }
+        if (active) {
+          setPerformance(response);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (active) {
+          setPerformanceError(
+            cause instanceof Error ? cause.message : "Signal performance unavailable"
+          );
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setPerformanceLoading(false);
         }
       });
     return () => {
@@ -190,8 +235,20 @@ export function StrategyPage() {
     ).then((created) => {
       if (created) {
         setDraftName("");
+        setCreateOpen(false);
       }
     });
+  }
+
+  function openCreateDialog() {
+    if (!data || pending || data.profiles.length >= 20) {
+      return;
+    }
+    setError(null);
+    setMessage(null);
+    setDraftName("");
+    setDraftParameters({ ...activeParameters(data) });
+    setCreateOpen(true);
   }
 
   function deleteProfile(profile: StrategyProfile) {
@@ -234,7 +291,7 @@ export function StrategyPage() {
         a time. Activations affect future scans, not signals already produced.
       </div>
 
-      {error ? (
+      {error && !createOpen ? (
         <div role="alert" className="mb-5 rounded-xl border border-rose-400/20 bg-rose-400/[0.055] px-4 py-3 text-xs text-rose-200">
           {error}
         </div>
@@ -247,79 +304,136 @@ export function StrategyPage() {
 
       <DashboardCard className="p-4 sm:p-5">
         <CardHeading
-          title="Create a strategy profile"
-          description="Start from the active profile and adjust the current strategy's supported parameters."
+          title="Strategy profiles"
+          description="Create and save named configurations for the current strategy."
+          action={
+            <span className="rounded-md border border-white/[0.07] px-2 py-1 text-[10px] text-[#9297a1]">
+              {data ? `${data.profiles.length}/20 profiles` : "—"}
+            </span>
+          }
         />
-        {loading ? (
-          <p className="mt-4 text-xs text-[#858b96]">Loading strategy configuration…</p>
-        ) : data && draftParameters ? (
-          <form onSubmit={createProfile} className="mt-4">
-            <label className="block max-w-lg text-[10px] text-[#9297a1]">
-              Profile name
-              <input
-                required
-                maxLength={40}
-                value={draftName}
-                disabled={pending}
-                onChange={(event) => setDraftName(event.target.value)}
-                placeholder="e.g. Conservative confirmation"
-                className="mt-1.5 w-full rounded-lg border border-white/[0.09] bg-[#0d1014] px-3 py-2.5 text-xs text-[#e1dfd9] outline-none focus:border-[#efbd5b]/40 disabled:opacity-50"
-              />
-            </label>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {parameterFields.map(({ key, label, description, min, max, step }) => (
-                <label key={key} className="text-[10px] text-[#9297a1]">
-                  {label}
-                  <input
-                    required
-                    type="number"
-                    min={min}
-                    max={max}
-                    step={step}
-                    disabled={pending}
-                    value={draftParameters[key]}
-                    onChange={(event) => {
-                      const value = Number(event.target.value);
-                      setDraftParameters((current) =>
-                        current ? { ...current, [key]: value } : current
-                      );
-                    }}
-                    className="mt-1.5 w-full rounded-lg border border-white/[0.09] bg-[#0d1014] px-3 py-2.5 text-xs text-[#e1dfd9] outline-none focus:border-[#efbd5b]/40 disabled:opacity-50"
-                  />
-                  <span className="mt-1 block text-[9px] text-[#686f79]">{description}</span>
-                </label>
-              ))}
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <button
-                type="submit"
-                disabled={pending || data.profiles.length >= 20}
-                className="inline-flex items-center gap-2 rounded-xl border border-[#efbd5b]/20 bg-[#efbd5b]/[0.08] px-4 py-2.5 text-xs font-medium text-[#f0ca7e] transition hover:bg-[#efbd5b]/[0.14] disabled:cursor-not-allowed disabled:opacity-45"
-              >
-                <Plus size={14} />
-                {pending ? "Saving profile…" : "Create profile"}
-              </button>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() =>
-                  baseline &&
-                  setDraftParameters({ ...baseline })
-                }
-                className="inline-flex items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.035] px-4 py-2.5 text-xs text-[#d3d1cb] hover:bg-white/[0.07] disabled:opacity-45"
-              >
-                <RotateCcw size={13} />
-                Use defaults
-              </button>
-              <span className="text-[10px] text-[#777e88]">
-                {data.profiles.length}/20 saved profiles
-              </span>
-            </div>
-          </form>
-        ) : (
-          <p className="mt-4 text-xs text-[#858b96]">Strategy configuration is unavailable.</p>
-        )}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs leading-5 text-[#858b96]">
+            New profiles start with the currently active configuration. Adjust parameters
+            after opening the editor.
+          </p>
+          <button
+            type="button"
+            disabled={loading || !data || pending || data.profiles.length >= 20}
+            onClick={openCreateDialog}
+            className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-[#efbd5b]/20 bg-[#efbd5b]/[0.08] px-4 py-2.5 text-xs font-medium text-[#f0ca7e] transition hover:bg-[#efbd5b]/[0.14] disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            <Plus size={14} />
+            Create strategy
+          </button>
+        </div>
       </DashboardCard>
+
+      <dialog
+        ref={dialogRef}
+        aria-labelledby="create-strategy-title"
+        onClose={() => setCreateOpen(false)}
+        className="m-auto max-h-[90dvh] w-[min(94vw,900px)] max-w-none overflow-hidden rounded-2xl border border-white/[0.1] bg-[#101318] p-0 text-[#f4f3ef] shadow-[0_24px_100px_rgba(0,0,0,0.65)] backdrop:bg-black/75 backdrop:backdrop-blur-sm"
+      >
+        <div className="flex max-h-[90dvh] flex-col">
+          <div className="flex items-start justify-between gap-4 border-b border-white/[0.07] px-4 py-4 sm:px-6">
+            <div>
+              <h2 id="create-strategy-title" className="text-base font-semibold text-[#f3f1ec]">
+                Create strategy profile
+              </h2>
+              <p className="mt-1 text-xs text-[#858b96]">
+                Give this parameter configuration a name.
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-label="Close create strategy dialog"
+              onClick={() => setCreateOpen(false)}
+              className="grid size-8 shrink-0 place-items-center rounded-lg border border-white/[0.07] text-[#9297a1] hover:bg-white/[0.06] hover:text-white"
+            >
+              <X size={15} />
+            </button>
+          </div>
+          {draftParameters ? (
+            <form onSubmit={createProfile} className="soft-scrollbar overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+              {error ? (
+                <div
+                  role="alert"
+                  className="mb-4 rounded-xl border border-rose-400/20 bg-rose-400/[0.055] px-4 py-3 text-xs text-rose-200"
+                >
+                  {error}
+                </div>
+              ) : null}
+              <label className="block max-w-lg text-[10px] text-[#9297a1]">
+                Profile name
+                <input
+                  required
+                  autoFocus
+                  maxLength={40}
+                  value={draftName}
+                  disabled={pending}
+                  onChange={(event) => setDraftName(event.target.value)}
+                  placeholder="e.g. Conservative confirmation"
+                  className="mt-1.5 w-full rounded-lg border border-white/[0.09] bg-[#0d1014] px-3 py-2.5 text-xs text-[#e1dfd9] outline-none focus:border-[#efbd5b]/40 disabled:opacity-50"
+                />
+              </label>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {parameterFields.map(({ key, label, description, min, max, step }) => (
+                  <label key={key} className="text-[10px] text-[#9297a1]">
+                    {label}
+                    <input
+                      required
+                      type="number"
+                      min={min}
+                      max={max}
+                      step={step}
+                      disabled={pending}
+                      value={draftParameters[key]}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        setDraftParameters((current) =>
+                          current ? { ...current, [key]: value } : current
+                        );
+                      }}
+                      className="mt-1.5 w-full rounded-lg border border-white/[0.09] bg-[#0d1014] px-3 py-2.5 text-xs text-[#e1dfd9] outline-none focus:border-[#efbd5b]/40 disabled:opacity-50"
+                    />
+                    <span className="mt-1 block text-[9px] text-[#686f79]">{description}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="sticky bottom-0 -mx-4 mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] bg-[#101318] px-4 pt-4 sm:-mx-6 sm:px-6">
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => baseline && setDraftParameters({ ...baseline })}
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.035] px-4 py-2.5 text-xs text-[#d3d1cb] hover:bg-white/[0.07] disabled:opacity-45"
+                >
+                  <RotateCcw size={13} />
+                  Use defaults
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => setCreateOpen(false)}
+                    className="rounded-xl border border-white/[0.09] px-4 py-2.5 text-xs text-[#d3d1cb] hover:bg-white/[0.05] disabled:opacity-45"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={pending || !data || data.profiles.length >= 20}
+                    className="inline-flex items-center gap-2 rounded-xl border border-[#efbd5b]/20 bg-[#efbd5b]/[0.08] px-4 py-2.5 text-xs font-medium text-[#f0ca7e] transition hover:bg-[#efbd5b]/[0.14] disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    <Plus size={14} />
+                    {pending ? "Saving…" : "Save strategy"}
+                  </button>
+                </div>
+              </div>
+            </form>
+          ) : null}
+        </div>
+      </dialog>
 
       <DashboardCard className="mt-5 p-4 sm:p-5">
         <CardHeading
@@ -434,6 +548,97 @@ export function StrategyPage() {
               "Default"}
             . Changes apply to subsequent scans.
           </p>
+        ) : null}
+      </DashboardCard>
+
+      <DashboardCard className="mt-5 p-4 sm:p-5">
+        <CardHeading
+          title="Observed strategy outcomes"
+          description="Forward-tracked signals, attributed to the exact configuration used when detected."
+        />
+        <p className="mt-2 text-[10px] leading-5 text-[#858b96]">
+          Win rate uses resolved wins and losses only. Unresolved and ambiguous outcomes are
+          excluded; these observed results are not a backtest or a guarantee of future performance.
+        </p>
+        {performanceError ? (
+          <div role="alert" className="mt-4 rounded-xl border border-rose-400/20 bg-rose-400/[0.055] px-4 py-3 text-xs text-rose-200">
+            {performanceError}
+          </div>
+        ) : performanceLoading ? (
+          <p className="mt-4 text-xs text-[#858b96]">Loading observed outcomes…</p>
+        ) : performance?.strategies.length ? (
+          <div className="soft-scrollbar mt-4 overflow-x-auto">
+            <table className="w-full min-w-[650px] border-collapse text-left text-xs">
+              <thead>
+                <tr className="border-b border-white/[0.07] text-[10px] text-[#858b96]">
+                  <th scope="col" className="px-3 py-3 font-medium">Strategy snapshot</th>
+                  <th scope="col" className="px-3 py-3 font-medium">Signals</th>
+                  <th scope="col" className="px-3 py-3 font-medium">Wins</th>
+                  <th scope="col" className="px-3 py-3 font-medium">Losses</th>
+                  <th scope="col" className="px-3 py-3 font-medium">Unresolved / ambiguous</th>
+                  <th scope="col" className="px-3 py-3 font-medium">Win rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {performance.strategies.map((strategy) => (
+                  <tr key={strategy.strategyId} className="border-b border-white/[0.045] last:border-0">
+                    <th scope="row" className="px-3 py-3 font-medium text-[#d7d4cd]">
+                      {strategy.strategyName}
+                    </th>
+                    <td className="px-3 py-3 tabular-nums text-[#c9c7c1]">{strategy.total}</td>
+                    <td className="px-3 py-3 tabular-nums text-emerald-300">{strategy.wins}</td>
+                    <td className="px-3 py-3 tabular-nums text-rose-300">{strategy.losses}</td>
+                    <td className="px-3 py-3 tabular-nums text-[#c9c7c1]">{strategy.unresolved}</td>
+                    <td className="px-3 py-3 tabular-nums text-[#c9c7c1]">
+                      {strategy.winRate === null ? "—" : `${strategy.winRate.toFixed(1)}%`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="mt-4 text-xs text-[#858b96]">
+            No signals have been recorded yet. New detections will appear here as outcomes are tracked.
+          </p>
+        )}
+        {performance && performance.signals.length > 0 ? (
+          <div className="mt-6">
+            <h3 className="mb-3 text-xs font-medium text-[#d7d4cd]">Recent signal history</h3>
+            <div className="soft-scrollbar overflow-x-auto">
+              <table className="w-full min-w-[580px] border-collapse text-left text-[11px]">
+                <thead>
+                  <tr className="border-b border-white/[0.07] text-[10px] text-[#858b96]">
+                    <th scope="col" className="px-3 py-2.5 font-medium">Detected</th>
+                    <th scope="col" className="px-3 py-2.5 font-medium">Market</th>
+                    <th scope="col" className="px-3 py-2.5 font-medium">Strategy</th>
+                    <th scope="col" className="px-3 py-2.5 font-medium">Outcome</th>
+                    <th scope="col" className="px-3 py-2.5 font-medium">Alert delivery</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {performance.signals.map((entry) => (
+                    <tr key={entry.id} className="border-b border-white/[0.045] last:border-0">
+                      <td className="px-3 py-3 text-[#aeb1b8]">
+                        {new Date(entry.detectedAt)
+                          .toISOString()
+                          .replace("T", " ")
+                          .slice(0, 16)} UTC
+                      </td>
+                      <td className="px-3 py-3 text-[#d7d4cd]">
+                        {entry.signal.symbol} · {entry.signal.direction}
+                      </td>
+                      <td className="px-3 py-3 text-[#c9c7c1]">{entry.strategy.name}</td>
+                      <td className="px-3 py-3 capitalize text-[#c9c7c1]">{entry.outcome}</td>
+                      <td className="px-3 py-3 text-[#c9c7c1]">
+                        {entry.deliveryStatus.replace("_", " ")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : null}
       </DashboardCard>
     </main>

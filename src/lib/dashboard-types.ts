@@ -58,6 +58,31 @@ export interface DashboardScanResponse {
   results: DashboardScanResult[];
 }
 
+export interface StrategyPerformance {
+  strategyId: string;
+  strategyName: string;
+  total: number;
+  wins: number;
+  losses: number;
+  unresolved: number;
+  winRate: number | null;
+}
+
+export interface TrackedSignalData {
+  id: string;
+  signal: SignalData;
+  strategy: { id: string; name: string };
+  detectedAt: number;
+  deliveryStatus: "not_attempted" | "attempting" | "succeeded" | "failed";
+  outcome: "unresolved" | "ambiguous" | "win" | "loss";
+  outcomeAt: number | null;
+}
+
+export interface DashboardPerformance {
+  strategies: StrategyPerformance[];
+  signals: TrackedSignalData[];
+}
+
 export function isSignalData(value: unknown): value is SignalData {
   if (value === null || typeof value !== "object") {
     return false;
@@ -214,4 +239,72 @@ export function isDashboardScanResponse(value: unknown): value is DashboardScanR
       );
     })
   );
+}
+
+export function isDashboardPerformance(value: unknown): value is DashboardPerformance {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  const performance = value as Record<string, unknown>;
+  return (
+    Array.isArray(performance.strategies) &&
+    performance.strategies.every(isStrategyPerformance) &&
+    Array.isArray(performance.signals) &&
+    performance.signals.length <= 25 &&
+    performance.signals.every((entry) => {
+      if (entry === null || typeof entry !== "object") {
+        return false;
+      }
+      const signal = entry as Record<string, unknown>;
+      return (
+        typeof signal.id === "string" &&
+        isSignalData(signal.signal) &&
+        signal.strategy !== null &&
+        typeof signal.strategy === "object" &&
+        typeof (signal.strategy as Record<string, unknown>).id === "string" &&
+        String((signal.strategy as Record<string, unknown>).id).length > 0 &&
+        typeof (signal.strategy as Record<string, unknown>).name === "string" &&
+        String((signal.strategy as Record<string, unknown>).name).trim().length > 0 &&
+        typeof signal.detectedAt === "number" &&
+        Number.isFinite(signal.detectedAt) &&
+        ["not_attempted", "attempting", "succeeded", "failed"].includes(
+          String(signal.deliveryStatus)
+        ) &&
+        ["unresolved", "ambiguous", "win", "loss"].includes(String(signal.outcome)) &&
+        (signal.outcome === "unresolved"
+          ? signal.outcomeAt === null
+          : typeof signal.outcomeAt === "number" && Number.isFinite(signal.outcomeAt))
+      );
+    })
+  );
+}
+
+function isStrategyPerformance(value: unknown): value is StrategyPerformance {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  const strategy = value as Record<string, unknown>;
+  const counts = [strategy.total, strategy.wins, strategy.losses, strategy.unresolved];
+  if (
+    typeof strategy.strategyId !== "string" ||
+    !strategy.strategyId ||
+    typeof strategy.strategyName !== "string" ||
+    !strategy.strategyName.trim() ||
+    !counts.every(
+      (count) => typeof count === "number" && Number.isSafeInteger(count) && count >= 0
+    )
+  ) {
+    return false;
+  }
+  const resolved = Number(strategy.wins) + Number(strategy.losses);
+  if (Number(strategy.total) !== resolved + Number(strategy.unresolved)) {
+    return false;
+  }
+  return resolved === 0
+    ? strategy.winRate === null
+    : typeof strategy.winRate === "number" &&
+        Number.isFinite(strategy.winRate) &&
+        strategy.winRate >= 0 &&
+        strategy.winRate <= 100 &&
+        Math.abs(strategy.winRate - (Number(strategy.wins) / resolved) * 100) < 1e-8;
 }
